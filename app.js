@@ -42,9 +42,9 @@
 /************************************************************************/
 /******/ ([
 /* 0 */
-/***/ function(module, exports, __webpack_require__) {
+/***/ (function(module, exports, __webpack_require__) {
 
-	'use strict';
+	"use strict";
 	
 	__webpack_require__(1);
 	__webpack_require__(2);
@@ -64,33 +64,42 @@
 	
 	queue().defer(d3.json, "data/ws_topo.json").await(display);
 	
-	d3.select('#search').on('input', function () {
-	  console.log(this.value);
-	  map.highlight(this.value);
+	d3.select("#search").on("input", function () {
+	  var value = this.value.toLowerCase();
+	  console.log(value);
+	  map.highlight(value);
+	});
+	
+	d3.selectAll(".example-link").on("click", function () {
+	  d3.event.preventDefault();
+	  console.log(this.dataset.regex);
+	  var regex = this.dataset.regex;
+	  d3.select("#search").property("value", regex);
+	  map.highlight(regex);
 	});
 
-/***/ },
+/***/ }),
 /* 1 */
-/***/ function(module, exports, __webpack_require__) {
+/***/ (function(module, exports, __webpack_require__) {
 
-	module.exports = __webpack_require__.p + "index.html"
+	module.exports = __webpack_require__.p + "index.html";
 
-/***/ },
+/***/ }),
 /* 2 */
-/***/ function(module, exports, __webpack_require__) {
+/***/ (function(module, exports, __webpack_require__) {
 
 	'use strict';
 	
 	__webpack_require__(3);
 	__webpack_require__(12);
 
-/***/ },
+/***/ }),
 /* 3 */
-/***/ function(module, exports) {
+/***/ (function(module, exports) {
 
 	// removed by extract-text-webpack-plugin
 
-/***/ },
+/***/ }),
 /* 4 */,
 /* 5 */,
 /* 6 */,
@@ -100,104 +109,129 @@
 /* 10 */,
 /* 11 */,
 /* 12 */
-/***/ function(module, exports) {
+/***/ (function(module, exports) {
 
 	// removed by extract-text-webpack-plugin
 
-/***/ },
+/***/ }),
 /* 13 */,
 /* 14 */
-/***/ function(module, exports, __webpack_require__) {
+/***/ (function(module, exports, __webpack_require__) {
 
-	var __WEBPACK_AMD_DEFINE_RESULT__;(function() {
+	(function (global, factory) {
+	   true ? module.exports = factory() :
+	  typeof define === 'function' && define.amd ? define('queue', factory) :
+	  (global.queue = factory());
+	}(this, function () { 'use strict';
+	
 	  var slice = [].slice;
 	
-	  function queue(parallelism) {
+	  function noop() {}
+	
+	  var noabort = {};
+	  var success = [null];
+	  function newQueue(concurrency) {
+	    if (!(concurrency >= 1)) throw new Error;
+	
 	    var q,
 	        tasks = [],
-	        started = 0, // number of tasks that have been started (and perhaps finished)
-	        active = 0, // number of tasks currently being executed (started but not finished)
-	        remaining = 0, // number of tasks not yet finished
-	        popping, // inside a synchronous task callback?
-	        error = null,
-	        await = noop,
-	        all;
+	        results = [],
+	        waiting = 0,
+	        active = 0,
+	        ended = 0,
+	        starting, // inside a synchronous task callback?
+	        error,
+	        callback = noop,
+	        callbackAll = true;
 	
-	    if (!parallelism) parallelism = Infinity;
-	
-	    function pop() {
-	      while (popping = started < tasks.length && active < parallelism) {
-	        var i = started++,
+	    function start() {
+	      if (starting) return; // let the current task complete
+	      while (starting = waiting && active < concurrency) {
+	        var i = ended + active,
 	            t = tasks[i],
-	            a = slice.call(t, 1);
-	        a.push(callback(i));
-	        ++active;
-	        t[0].apply(null, a);
+	            j = t.length - 1,
+	            c = t[j];
+	        t[j] = end(i);
+	        --waiting, ++active, tasks[i] = c.apply(null, t) || noabort;
 	      }
 	    }
 	
-	    function callback(i) {
+	    function end(i) {
 	      return function(e, r) {
-	        --active;
-	        if (error != null) return;
+	        if (!tasks[i]) throw new Error; // detect multiple callbacks
+	        --active, ++ended, tasks[i] = null;
+	        if (error != null) return; // only report the first error
 	        if (e != null) {
-	          error = e; // ignore new tasks and squelch active callbacks
-	          started = remaining = NaN; // stop queued tasks from starting
-	          notify();
+	          abort(e);
 	        } else {
-	          tasks[i] = r;
-	          if (--remaining) popping || pop();
-	          else notify();
+	          results[i] = r;
+	          if (waiting) start();
+	          else if (!active) notify();
 	        }
 	      };
 	    }
 	
+	    function abort(e) {
+	      error = e; // ignore new tasks and squelch active callbacks
+	      waiting = NaN; // stop queued tasks from starting
+	      notify();
+	    }
+	
 	    function notify() {
-	      if (error != null) await(error);
-	      else if (all) await(error, tasks);
-	      else await.apply(null, [error].concat(tasks));
+	      if (error != null) callback(error);
+	      else if (callbackAll) callback(null, results);
+	      else callback.apply(null, success.concat(results));
 	    }
 	
 	    return q = {
-	      defer: function() {
-	        if (!error) {
-	          tasks.push(arguments);
-	          ++remaining;
-	          pop();
+	      defer: function(f) {
+	        if (callback !== noop) throw new Error;
+	        var t = slice.call(arguments, 1);
+	        t.push(f);
+	        ++waiting, tasks.push(t);
+	        start();
+	        return q;
+	      },
+	      abort: function() {
+	        if (error == null) {
+	          var i = ended + active, t;
+	          while (--i >= 0) (t = tasks[i]) && t.abort && t.abort();
+	          abort(new Error("abort"));
 	        }
 	        return q;
 	      },
 	      await: function(f) {
-	        await = f;
-	        all = false;
-	        if (!remaining) notify();
+	        if (callback !== noop) throw new Error;
+	        callback = f, callbackAll = false;
+	        if (!waiting && !active) notify();
 	        return q;
 	      },
 	      awaitAll: function(f) {
-	        await = f;
-	        all = true;
-	        if (!remaining) notify();
+	        if (callback !== noop) throw new Error;
+	        callback = f, callbackAll = true;
+	        if (!waiting && !active) notify();
 	        return q;
 	      }
 	    };
 	  }
 	
-	  function noop() {}
+	  function queue(concurrency) {
+	    return newQueue(arguments.length ? +concurrency : Infinity);
+	  }
 	
-	  queue.version = "1.0.7";
-	  if (true) !(__WEBPACK_AMD_DEFINE_RESULT__ = function() { return queue; }.call(exports, __webpack_require__, exports, module), __WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__));
-	  else if (typeof module === "object" && module.exports) module.exports = queue;
-	  else this.queue = queue;
-	})();
+	  queue.version = "1.2.1";
+	
+	  return queue;
+	
+	}));
 
-
-/***/ },
+/***/ }),
 /* 15 */
-/***/ function(module, exports, __webpack_require__) {
+/***/ (function(module, exports, __webpack_require__) {
 
 	var __WEBPACK_AMD_DEFINE_FACTORY__, __WEBPACK_AMD_DEFINE_RESULT__;!function() {
 	  var d3 = {
-	    version: "3.5.9"
+	    version: "3.5.17"
 	  };
 	  var d3_arraySlice = [].slice, d3_array = function(list) {
 	    return d3_arraySlice.call(list);
@@ -417,20 +451,20 @@
 	    while (i < n) pairs[i] = [ p0 = p1, p1 = array[++i] ];
 	    return pairs;
 	  };
-	  d3.zip = function() {
-	    if (!(n = arguments.length)) return [];
-	    for (var i = -1, m = d3.min(arguments, d3_zipLength), zips = new Array(m); ++i < m; ) {
-	      for (var j = -1, n, zip = zips[i] = new Array(n); ++j < n; ) {
-	        zip[j] = arguments[j][i];
+	  d3.transpose = function(matrix) {
+	    if (!(n = matrix.length)) return [];
+	    for (var i = -1, m = d3.min(matrix, d3_transposeLength), transpose = new Array(m); ++i < m; ) {
+	      for (var j = -1, n, row = transpose[i] = new Array(n); ++j < n; ) {
+	        row[j] = matrix[j][i];
 	      }
 	    }
-	    return zips;
+	    return transpose;
 	  };
-	  function d3_zipLength(d) {
+	  function d3_transposeLength(d) {
 	    return d.length;
 	  }
-	  d3.transpose = function(matrix) {
-	    return d3.zip.apply(d3, matrix);
+	  d3.zip = function() {
+	    return d3.transpose(arguments);
 	  };
 	  d3.keys = function(map) {
 	    var keys = [];
@@ -817,9 +851,10 @@
 	      return d3_selectAll(selector, this);
 	    };
 	  }
+	  var d3_nsXhtml = "http://www.w3.org/1999/xhtml";
 	  var d3_nsPrefix = {
 	    svg: "http://www.w3.org/2000/svg",
-	    xhtml: "http://www.w3.org/1999/xhtml",
+	    xhtml: d3_nsXhtml,
 	    xlink: "http://www.w3.org/1999/xlink",
 	    xml: "http://www.w3.org/XML/1998/namespace",
 	    xmlns: "http://www.w3.org/2000/xmlns/"
@@ -1002,7 +1037,7 @@
 	  function d3_selection_creator(name) {
 	    function create() {
 	      var document = this.ownerDocument, namespace = this.namespaceURI;
-	      return namespace ? document.createElementNS(namespace, name) : document.createElement(name);
+	      return namespace === d3_nsXhtml && document.documentElement.namespaceURI === d3_nsXhtml ? document.createElement(name) : document.createElementNS(namespace, name);
 	    }
 	    function createNS() {
 	      return this.ownerDocument.createElementNS(name.space, name.local);
@@ -1401,7 +1436,7 @@
 	    }
 	    function dragstart(id, position, subject, move, end) {
 	      return function() {
-	        var that = this, target = d3.event.target, parent = that.parentNode, dispatch = event.of(that, arguments), dragged = 0, dragId = id(), dragName = ".drag" + (dragId == null ? "" : "-" + dragId), dragOffset, dragSubject = d3.select(subject(target)).on(move + dragName, moved).on(end + dragName, ended), dragRestore = d3_event_dragSuppress(target), position0 = position(parent, dragId);
+	        var that = this, target = d3.event.target.correspondingElement || d3.event.target, parent = that.parentNode, dispatch = event.of(that, arguments), dragged = 0, dragId = id(), dragName = ".drag" + (dragId == null ? "" : "-" + dragId), dragOffset, dragSubject = d3.select(subject(target)).on(move + dragName, moved).on(end + dragName, ended), dragRestore = d3_event_dragSuppress(target), position0 = position(parent, dragId);
 	        if (origin) {
 	          dragOffset = origin.apply(that, arguments);
 	          dragOffset = [ dragOffset.x - position0[0], dragOffset.y - position0[1] ];
@@ -3721,7 +3756,7 @@
 	        λ0 = λ, sinφ0 = sinφ, cosφ0 = cosφ, point0 = point;
 	      }
 	    }
-	    return (polarAngle < -ε || polarAngle < ε && d3_geo_areaRingSum < 0) ^ winding & 1;
+	    return (polarAngle < -ε || polarAngle < ε && d3_geo_areaRingSum < -ε) ^ winding & 1;
 	  }
 	  function d3_geo_clipCircle(radius) {
 	    var cr = Math.cos(radius), smallRadius = cr > 0, notHemisphere = abs(cr) > ε, interpolate = d3_geo_circleInterpolate(radius, 6 * d3_radians);
@@ -6354,7 +6389,7 @@
 	          index: di,
 	          startAngle: x0,
 	          endAngle: x,
-	          value: (x - x0) / k
+	          value: groupSums[di]
 	        };
 	        x += padding;
 	      }
@@ -6564,7 +6599,7 @@
 	          alpha = x;
 	        } else {
 	          timer.c = null, timer.t = NaN, timer = null;
-	          event.start({
+	          event.end({
 	            type: "end",
 	            alpha: alpha = 0
 	          });
@@ -7762,7 +7797,9 @@
 	    return d3.rebind(scale, linear, "range", "rangeRound", "interpolate", "clamp");
 	  }
 	  function d3_scale_linearNice(domain, m) {
-	    return d3_scale_nice(domain, d3_scale_niceStep(d3_scale_linearTickRange(domain, m)[2]));
+	    d3_scale_nice(domain, d3_scale_niceStep(d3_scale_linearTickRange(domain, m)[2]));
+	    d3_scale_nice(domain, d3_scale_niceStep(d3_scale_linearTickRange(domain, m)[2]));
+	    return domain;
 	  }
 	  function d3_scale_linearTickRange(domain, m) {
 	    if (m == null) m = 10;
@@ -7864,10 +7901,11 @@
 	    scale.tickFormat = function(n, format) {
 	      if (!arguments.length) return d3_scale_logFormat;
 	      if (arguments.length < 2) format = d3_scale_logFormat; else if (typeof format !== "function") format = d3.format(format);
-	      var k = Math.max(.1, n / scale.ticks().length), f = positive ? (e = 1e-12, Math.ceil) : (e = -1e-12, 
-	      Math.floor), e;
+	      var k = Math.max(1, base * n / scale.ticks().length);
 	      return function(d) {
-	        return d / pow(f(log(d) + e)) <= k ? format(d) : "";
+	        var i = d / pow(Math.round(log(d)));
+	        if (i * base < base - .5) i *= base;
+	        return i <= k ? format(d) : "";
 	      };
 	    };
 	    scale.copy = function() {
@@ -9746,11 +9784,11 @@
 	  if (true) this.d3 = d3, !(__WEBPACK_AMD_DEFINE_FACTORY__ = (d3), __WEBPACK_AMD_DEFINE_RESULT__ = (typeof __WEBPACK_AMD_DEFINE_FACTORY__ === 'function' ? (__WEBPACK_AMD_DEFINE_FACTORY__.call(exports, __webpack_require__, exports, module)) : __WEBPACK_AMD_DEFINE_FACTORY__), __WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__)); else if (typeof module === "object" && module.exports) module.exports = d3; else this.d3 = d3;
 	}();
 
-/***/ },
+/***/ }),
 /* 16 */
-/***/ function(module, exports, __webpack_require__) {
+/***/ (function(module, exports, __webpack_require__) {
 
-	'use strict';
+	"use strict";
 	
 	var d3 = __webpack_require__(15);
 	var topojson = __webpack_require__(17);
@@ -9780,9 +9818,10 @@
 	  var chart = function chart(selection) {
 	    selection.each(function (rawData) {
 	      geojson = rawData;
-	      var svg = d3.select(this).append('svg');
+	      var svg = d3.select(this).append("svg");
 	      svg.attr("width", width + margin.left + margin.right);
 	      svg.attr("height", height + margin.top + margin.bottom);
+	      var rect = svg.append("rect").attr("width", width + margin.left + margin.right).attr("height", height + margin.top + margin.bottom).attr("fill", "white");
 	      g = svg.append("g").attr("transform", "translate(" + margin.left + "," + margin.top + ")");
 	
 	      var westSeattle = topojson.feature(geojson, geojson.objects.west_seattle_s);
@@ -9810,7 +9849,7 @@
 	      // .scaleExtent([226098, 826098])
 	      .on("zoom", zoomed);
 	
-	      g.selectAll("street").data(features).enter().append('path').attr('class', 'street').attr("d", path).on('mouseover', mouseover).on('mouseout', mouseout).classed('main', function (d) {
+	      g.selectAll("street").data(features).enter().append("path").attr("class", "street").attr("d", path).on("mouseover", mouseover).on("mouseout", mouseout).classed("main", function (d) {
 	        var m = false;
 	        mains.forEach(function (main) {
 	          if (d.properties.name && d.properties.name.toLowerCase().match(main)) {
@@ -9820,9 +9859,10 @@
 	        return m;
 	      });
 	
-	      g.selectAll("hover").data(features).enter().append('path').attr('class', 'hover').attr("d", path).on('mouseover', mouseover).on('mouseout', mouseout).classed('highlight', false);
+	      g.selectAll("hover").data(features).enter().append("path").attr("class", "hover").attr("d", path).on("mouseover", mouseover).on("mouseout", mouseout).classed("highlight", false);
 	
 	      g.call(zoom);
+	      rect.call(zoom);
 	    });
 	  };
 	
@@ -9837,26 +9877,24 @@
 	    tip.showTooltip(d.properties.name, d3.event);
 	
 	    if (d.properties.name) {
-	
-	      g.selectAll('.street').filter(function (s) {
+	      g.selectAll(".street").filter(function (s) {
 	        return d.properties.name == s.properties.name;
-	      }).classed('hovered', true);
+	      }).classed("hovered", true);
 	    }
 	    // d3.select(this).classed('hovered', true);
 	  }
 	
 	  function mouseout() {
 	    tip.hideTooltip();
-	    g.selectAll('.street').classed('hovered', false);
+	    g.selectAll(".street").classed("hovered", false);
 	  }
 	
 	  chart.highlight = function (roadRegEx) {
 	    var re = new RegExp(roadRegEx);
 	    if (roadRegEx.length == 0) {
-	
-	      re = new RegExp('NOTHINGMACHTES');
+	      re = new RegExp("NOTHINGMACHTES");
 	    }
-	    g.selectAll('path').classed('highlight', function (d) {
+	    g.selectAll("path").classed("highlight", function (d) {
 	      return d.properties.name && d.properties.name.toLowerCase().match(re);
 	    });
 	    // .each(function(d) { console.log(d); })
@@ -9865,559 +9903,561 @@
 	  return chart;
 	};
 
-/***/ },
+/***/ }),
 /* 17 */
-/***/ function(module, exports, __webpack_require__) {
+/***/ (function(module, exports, __webpack_require__) {
 
 	(function (global, factory) {
 	   true ? factory(exports) :
 	  typeof define === 'function' && define.amd ? define(['exports'], factory) :
 	  (factory((global.topojson = global.topojson || {})));
-	}(this, function (exports) { 'use strict';
+	}(this, (function (exports) { 'use strict';
 	
-	  function noop() {}
+	function noop() {}
 	
-	  function transformAbsolute(transform) {
-	    if (!transform) return noop;
-	    var x0,
-	        y0,
-	        kx = transform.scale[0],
-	        ky = transform.scale[1],
-	        dx = transform.translate[0],
-	        dy = transform.translate[1];
-	    return function(point, i) {
-	      if (!i) x0 = y0 = 0;
-	      point[0] = (x0 += point[0]) * kx + dx;
-	      point[1] = (y0 += point[1]) * ky + dy;
-	    };
+	function transformAbsolute(transform) {
+	  if (!transform) return noop;
+	  var x0,
+	      y0,
+	      kx = transform.scale[0],
+	      ky = transform.scale[1],
+	      dx = transform.translate[0],
+	      dy = transform.translate[1];
+	  return function(point, i) {
+	    if (!i) x0 = y0 = 0;
+	    point[0] = (x0 += point[0]) * kx + dx;
+	    point[1] = (y0 += point[1]) * ky + dy;
+	  };
+	}
+	
+	function transformRelative(transform) {
+	  if (!transform) return noop;
+	  var x0,
+	      y0,
+	      kx = transform.scale[0],
+	      ky = transform.scale[1],
+	      dx = transform.translate[0],
+	      dy = transform.translate[1];
+	  return function(point, i) {
+	    if (!i) x0 = y0 = 0;
+	    var x1 = Math.round((point[0] - dx) / kx),
+	        y1 = Math.round((point[1] - dy) / ky);
+	    point[0] = x1 - x0;
+	    point[1] = y1 - y0;
+	    x0 = x1;
+	    y0 = y1;
+	  };
+	}
+	
+	function reverse(array, n) {
+	  var t, j = array.length, i = j - n;
+	  while (i < --j) t = array[i], array[i++] = array[j], array[j] = t;
+	}
+	
+	function bisect(a, x) {
+	  var lo = 0, hi = a.length;
+	  while (lo < hi) {
+	    var mid = lo + hi >>> 1;
+	    if (a[mid] < x) lo = mid + 1;
+	    else hi = mid;
+	  }
+	  return lo;
+	}
+	
+	function feature(topology, o) {
+	  return o.type === "GeometryCollection" ? {
+	    type: "FeatureCollection",
+	    features: o.geometries.map(function(o) { return feature$1(topology, o); })
+	  } : feature$1(topology, o);
+	}
+	
+	function feature$1(topology, o) {
+	  var f = {
+	    type: "Feature",
+	    id: o.id,
+	    properties: o.properties || {},
+	    geometry: object(topology, o)
+	  };
+	  if (o.id == null) delete f.id;
+	  return f;
+	}
+	
+	function object(topology, o) {
+	  var absolute = transformAbsolute(topology.transform),
+	      arcs = topology.arcs;
+	
+	  function arc(i, points) {
+	    if (points.length) points.pop();
+	    for (var a = arcs[i < 0 ? ~i : i], k = 0, n = a.length, p; k < n; ++k) {
+	      points.push(p = a[k].slice());
+	      absolute(p, k);
+	    }
+	    if (i < 0) reverse(points, n);
 	  }
 	
-	  function transformRelative(transform) {
-	    if (!transform) return noop;
-	    var x0,
-	        y0,
-	        kx = transform.scale[0],
-	        ky = transform.scale[1],
-	        dx = transform.translate[0],
-	        dy = transform.translate[1];
-	    return function(point, i) {
-	      if (!i) x0 = y0 = 0;
-	      var x1 = Math.round((point[0] - dx) / kx),
-	          y1 = Math.round((point[1] - dy) / ky);
-	      point[0] = x1 - x0;
-	      point[1] = y1 - y0;
-	      x0 = x1;
-	      y0 = y1;
-	    };
+	  function point(p) {
+	    p = p.slice();
+	    absolute(p, 0);
+	    return p;
 	  }
 	
-	  function reverse(array, n) {
-	    var t, j = array.length, i = j - n;
-	    while (i < --j) t = array[i], array[i++] = array[j], array[j] = t;
+	  function line(arcs) {
+	    var points = [];
+	    for (var i = 0, n = arcs.length; i < n; ++i) arc(arcs[i], points);
+	    if (points.length < 2) points.push(points[0].slice());
+	    return points;
 	  }
 	
-	  function bisect(a, x) {
-	    var lo = 0, hi = a.length;
-	    while (lo < hi) {
-	      var mid = lo + hi >>> 1;
-	      if (a[mid] < x) lo = mid + 1;
-	      else hi = mid;
-	    }
-	    return lo;
+	  function ring(arcs) {
+	    var points = line(arcs);
+	    while (points.length < 4) points.push(points[0].slice());
+	    return points;
 	  }
 	
-	  function feature(topology, o) {
-	    return o.type === "GeometryCollection" ? {
-	      type: "FeatureCollection",
-	      features: o.geometries.map(function(o) { return feature$1(topology, o); })
-	    } : feature$1(topology, o);
+	  function polygon(arcs) {
+	    return arcs.map(ring);
 	  }
 	
-	  function feature$1(topology, o) {
-	    var f = {
-	      type: "Feature",
-	      id: o.id,
-	      properties: o.properties || {},
-	      geometry: object(topology, o)
-	    };
-	    if (o.id == null) delete f.id;
-	    return f;
+	  function geometry(o) {
+	    var t = o.type;
+	    return t === "GeometryCollection" ? {type: t, geometries: o.geometries.map(geometry)}
+	        : t in geometryType ? {type: t, coordinates: geometryType[t](o)}
+	        : null;
 	  }
 	
-	  function object(topology, o) {
-	    var absolute = transformAbsolute(topology.transform),
-	        arcs = topology.arcs;
+	  var geometryType = {
+	    Point: function(o) { return point(o.coordinates); },
+	    MultiPoint: function(o) { return o.coordinates.map(point); },
+	    LineString: function(o) { return line(o.arcs); },
+	    MultiLineString: function(o) { return o.arcs.map(line); },
+	    Polygon: function(o) { return polygon(o.arcs); },
+	    MultiPolygon: function(o) { return o.arcs.map(polygon); }
+	  };
 	
-	    function arc(i, points) {
-	      if (points.length) points.pop();
-	      for (var a = arcs[i < 0 ? ~i : i], k = 0, n = a.length, p; k < n; ++k) {
-	        points.push(p = a[k].slice());
-	        absolute(p, k);
-	      }
-	      if (i < 0) reverse(points, n);
+	  return geometry(o);
+	}
+	
+	function stitchArcs(topology, arcs) {
+	  var stitchedArcs = {},
+	      fragmentByStart = {},
+	      fragmentByEnd = {},
+	      fragments = [],
+	      emptyIndex = -1;
+	
+	  // Stitch empty arcs first, since they may be subsumed by other arcs.
+	  arcs.forEach(function(i, j) {
+	    var arc = topology.arcs[i < 0 ? ~i : i], t;
+	    if (arc.length < 3 && !arc[1][0] && !arc[1][1]) {
+	      t = arcs[++emptyIndex], arcs[emptyIndex] = i, arcs[j] = t;
 	    }
+	  });
 	
-	    function point(p) {
-	      p = p.slice();
-	      absolute(p, 0);
-	      return p;
-	    }
+	  arcs.forEach(function(i) {
+	    var e = ends(i),
+	        start = e[0],
+	        end = e[1],
+	        f, g;
 	
-	    function line(arcs) {
-	      var points = [];
-	      for (var i = 0, n = arcs.length; i < n; ++i) arc(arcs[i], points);
-	      if (points.length < 2) points.push(points[0].slice());
-	      return points;
-	    }
-	
-	    function ring(arcs) {
-	      var points = line(arcs);
-	      while (points.length < 4) points.push(points[0].slice());
-	      return points;
-	    }
-	
-	    function polygon(arcs) {
-	      return arcs.map(ring);
-	    }
-	
-	    function geometry(o) {
-	      var t = o.type;
-	      return t === "GeometryCollection" ? {type: t, geometries: o.geometries.map(geometry)}
-	          : t in geometryType ? {type: t, coordinates: geometryType[t](o)}
-	          : null;
-	    }
-	
-	    var geometryType = {
-	      Point: function(o) { return point(o.coordinates); },
-	      MultiPoint: function(o) { return o.coordinates.map(point); },
-	      LineString: function(o) { return line(o.arcs); },
-	      MultiLineString: function(o) { return o.arcs.map(line); },
-	      Polygon: function(o) { return polygon(o.arcs); },
-	      MultiPolygon: function(o) { return o.arcs.map(polygon); }
-	    };
-	
-	    return geometry(o);
-	  }
-	
-	  function stitchArcs(topology, arcs) {
-	    var stitchedArcs = {},
-	        fragmentByStart = {},
-	        fragmentByEnd = {},
-	        fragments = [],
-	        emptyIndex = -1;
-	
-	    // Stitch empty arcs first, since they may be subsumed by other arcs.
-	    arcs.forEach(function(i, j) {
-	      var arc = topology.arcs[i < 0 ? ~i : i], t;
-	      if (arc.length < 3 && !arc[1][0] && !arc[1][1]) {
-	        t = arcs[++emptyIndex], arcs[emptyIndex] = i, arcs[j] = t;
-	      }
-	    });
-	
-	    arcs.forEach(function(i) {
-	      var e = ends(i),
-	          start = e[0],
-	          end = e[1],
-	          f, g;
-	
-	      if (f = fragmentByEnd[start]) {
-	        delete fragmentByEnd[f.end];
-	        f.push(i);
-	        f.end = end;
-	        if (g = fragmentByStart[end]) {
-	          delete fragmentByStart[g.start];
-	          var fg = g === f ? f : f.concat(g);
-	          fragmentByStart[fg.start = f.start] = fragmentByEnd[fg.end = g.end] = fg;
-	        } else {
-	          fragmentByStart[f.start] = fragmentByEnd[f.end] = f;
-	        }
-	      } else if (f = fragmentByStart[end]) {
-	        delete fragmentByStart[f.start];
-	        f.unshift(i);
-	        f.start = start;
-	        if (g = fragmentByEnd[start]) {
-	          delete fragmentByEnd[g.end];
-	          var gf = g === f ? f : g.concat(f);
-	          fragmentByStart[gf.start = g.start] = fragmentByEnd[gf.end = f.end] = gf;
-	        } else {
-	          fragmentByStart[f.start] = fragmentByEnd[f.end] = f;
-	        }
+	    if (f = fragmentByEnd[start]) {
+	      delete fragmentByEnd[f.end];
+	      f.push(i);
+	      f.end = end;
+	      if (g = fragmentByStart[end]) {
+	        delete fragmentByStart[g.start];
+	        var fg = g === f ? f : f.concat(g);
+	        fragmentByStart[fg.start = f.start] = fragmentByEnd[fg.end = g.end] = fg;
 	      } else {
-	        f = [i];
-	        fragmentByStart[f.start = start] = fragmentByEnd[f.end = end] = f;
+	        fragmentByStart[f.start] = fragmentByEnd[f.end] = f;
 	      }
-	    });
-	
-	    function ends(i) {
-	      var arc = topology.arcs[i < 0 ? ~i : i], p0 = arc[0], p1;
-	      if (topology.transform) p1 = [0, 0], arc.forEach(function(dp) { p1[0] += dp[0], p1[1] += dp[1]; });
-	      else p1 = arc[arc.length - 1];
-	      return i < 0 ? [p1, p0] : [p0, p1];
-	    }
-	
-	    function flush(fragmentByEnd, fragmentByStart) {
-	      for (var k in fragmentByEnd) {
-	        var f = fragmentByEnd[k];
-	        delete fragmentByStart[f.start];
-	        delete f.start;
-	        delete f.end;
-	        f.forEach(function(i) { stitchedArcs[i < 0 ? ~i : i] = 1; });
-	        fragments.push(f);
+	    } else if (f = fragmentByStart[end]) {
+	      delete fragmentByStart[f.start];
+	      f.unshift(i);
+	      f.start = start;
+	      if (g = fragmentByEnd[start]) {
+	        delete fragmentByEnd[g.end];
+	        var gf = g === f ? f : g.concat(f);
+	        fragmentByStart[gf.start = g.start] = fragmentByEnd[gf.end = f.end] = gf;
+	      } else {
+	        fragmentByStart[f.start] = fragmentByEnd[f.end] = f;
 	      }
-	    }
-	
-	    flush(fragmentByEnd, fragmentByStart);
-	    flush(fragmentByStart, fragmentByEnd);
-	    arcs.forEach(function(i) { if (!stitchedArcs[i < 0 ? ~i : i]) fragments.push([i]); });
-	
-	    return fragments;
-	  }
-	
-	  function mesh(topology) {
-	    return object(topology, meshArcs.apply(this, arguments));
-	  }
-	
-	  function meshArcs(topology, o, filter) {
-	    var arcs = [];
-	
-	    function arc(i) {
-	      var j = i < 0 ? ~i : i;
-	      (geomsByArc[j] || (geomsByArc[j] = [])).push({i: i, g: geom});
-	    }
-	
-	    function line(arcs) {
-	      arcs.forEach(arc);
-	    }
-	
-	    function polygon(arcs) {
-	      arcs.forEach(line);
-	    }
-	
-	    function geometry(o) {
-	      if (o.type === "GeometryCollection") o.geometries.forEach(geometry);
-	      else if (o.type in geometryType) geom = o, geometryType[o.type](o.arcs);
-	    }
-	
-	    if (arguments.length > 1) {
-	      var geomsByArc = [],
-	          geom;
-	
-	      var geometryType = {
-	        LineString: line,
-	        MultiLineString: polygon,
-	        Polygon: polygon,
-	        MultiPolygon: function(arcs) { arcs.forEach(polygon); }
-	      };
-	
-	      geometry(o);
-	
-	      geomsByArc.forEach(arguments.length < 3
-	          ? function(geoms) { arcs.push(geoms[0].i); }
-	          : function(geoms) { if (filter(geoms[0].g, geoms[geoms.length - 1].g)) arcs.push(geoms[0].i); });
 	    } else {
-	      for (var i = 0, n = topology.arcs.length; i < n; ++i) arcs.push(i);
+	      f = [i];
+	      fragmentByStart[f.start = start] = fragmentByEnd[f.end = end] = f;
 	    }
+	  });
 	
-	    return {type: "MultiLineString", arcs: stitchArcs(topology, arcs)};
+	  function ends(i) {
+	    var arc = topology.arcs[i < 0 ? ~i : i], p0 = arc[0], p1;
+	    if (topology.transform) p1 = [0, 0], arc.forEach(function(dp) { p1[0] += dp[0], p1[1] += dp[1]; });
+	    else p1 = arc[arc.length - 1];
+	    return i < 0 ? [p1, p0] : [p0, p1];
 	  }
 	
-	  function cartesianTriangleArea(triangle) {
-	    var a = triangle[0], b = triangle[1], c = triangle[2];
-	    return Math.abs((a[0] - c[0]) * (b[1] - a[1]) - (a[0] - b[0]) * (c[1] - a[1]));
+	  function flush(fragmentByEnd, fragmentByStart) {
+	    for (var k in fragmentByEnd) {
+	      var f = fragmentByEnd[k];
+	      delete fragmentByStart[f.start];
+	      delete f.start;
+	      delete f.end;
+	      f.forEach(function(i) { stitchedArcs[i < 0 ? ~i : i] = 1; });
+	      fragments.push(f);
+	    }
 	  }
 	
-	  function ring(ring) {
-	    var i = -1,
-	        n = ring.length,
-	        a,
-	        b = ring[n - 1],
-	        area = 0;
+	  flush(fragmentByEnd, fragmentByStart);
+	  flush(fragmentByStart, fragmentByEnd);
+	  arcs.forEach(function(i) { if (!stitchedArcs[i < 0 ? ~i : i]) fragments.push([i]); });
 	
-	    while (++i < n) {
-	      a = b;
-	      b = ring[i];
-	      area += a[0] * b[1] - a[1] * b[0];
-	    }
+	  return fragments;
+	}
 	
-	    return area / 2;
+	function mesh(topology) {
+	  return object(topology, meshArcs.apply(this, arguments));
+	}
+	
+	function meshArcs(topology, o, filter) {
+	  var arcs = [];
+	
+	  function arc(i) {
+	    var j = i < 0 ? ~i : i;
+	    (geomsByArc[j] || (geomsByArc[j] = [])).push({i: i, g: geom});
 	  }
 	
-	  function merge(topology) {
-	    return object(topology, mergeArcs.apply(this, arguments));
+	  function line(arcs) {
+	    arcs.forEach(arc);
 	  }
 	
-	  function mergeArcs(topology, objects) {
-	    var polygonsByArc = {},
-	        polygons = [],
-	        components = [];
-	
-	    objects.forEach(function(o) {
-	      if (o.type === "Polygon") register(o.arcs);
-	      else if (o.type === "MultiPolygon") o.arcs.forEach(register);
-	    });
-	
-	    function register(polygon) {
-	      polygon.forEach(function(ring$$) {
-	        ring$$.forEach(function(arc) {
-	          (polygonsByArc[arc = arc < 0 ? ~arc : arc] || (polygonsByArc[arc] = [])).push(polygon);
-	        });
-	      });
-	      polygons.push(polygon);
-	    }
-	
-	    function area(ring$$) {
-	      return Math.abs(ring(object(topology, {type: "Polygon", arcs: [ring$$]}).coordinates[0]));
-	    }
-	
-	    polygons.forEach(function(polygon) {
-	      if (!polygon._) {
-	        var component = [],
-	            neighbors = [polygon];
-	        polygon._ = 1;
-	        components.push(component);
-	        while (polygon = neighbors.pop()) {
-	          component.push(polygon);
-	          polygon.forEach(function(ring$$) {
-	            ring$$.forEach(function(arc) {
-	              polygonsByArc[arc < 0 ? ~arc : arc].forEach(function(polygon) {
-	                if (!polygon._) {
-	                  polygon._ = 1;
-	                  neighbors.push(polygon);
-	                }
-	              });
-	            });
-	          });
-	        }
-	      }
-	    });
-	
-	    polygons.forEach(function(polygon) {
-	      delete polygon._;
-	    });
-	
-	    return {
-	      type: "MultiPolygon",
-	      arcs: components.map(function(polygons) {
-	        var arcs = [], n;
-	
-	        // Extract the exterior (unique) arcs.
-	        polygons.forEach(function(polygon) {
-	          polygon.forEach(function(ring$$) {
-	            ring$$.forEach(function(arc) {
-	              if (polygonsByArc[arc < 0 ? ~arc : arc].length < 2) {
-	                arcs.push(arc);
-	              }
-	            });
-	          });
-	        });
-	
-	        // Stitch the arcs into one or more rings.
-	        arcs = stitchArcs(topology, arcs);
-	
-	        // If more than one ring is returned,
-	        // at most one of these rings can be the exterior;
-	        // choose the one with the greatest absolute area.
-	        if ((n = arcs.length) > 1) {
-	          for (var i = 1, k = area(arcs[0]), ki, t; i < n; ++i) {
-	            if ((ki = area(arcs[i])) > k) {
-	              t = arcs[0], arcs[0] = arcs[i], arcs[i] = t, k = ki;
-	            }
-	          }
-	        }
-	
-	        return arcs;
-	      })
-	    };
+	  function polygon(arcs) {
+	    arcs.forEach(line);
 	  }
 	
-	  function neighbors(objects) {
-	    var indexesByArc = {}, // arc index -> array of object indexes
-	        neighbors = objects.map(function() { return []; });
+	  function geometry(o) {
+	    if (o.type === "GeometryCollection") o.geometries.forEach(geometry);
+	    else if (o.type in geometryType) geom = o, geometryType[o.type](o.arcs);
+	  }
 	
-	    function line(arcs, i) {
-	      arcs.forEach(function(a) {
-	        if (a < 0) a = ~a;
-	        var o = indexesByArc[a];
-	        if (o) o.push(i);
-	        else indexesByArc[a] = [i];
-	      });
-	    }
-	
-	    function polygon(arcs, i) {
-	      arcs.forEach(function(arc) { line(arc, i); });
-	    }
-	
-	    function geometry(o, i) {
-	      if (o.type === "GeometryCollection") o.geometries.forEach(function(o) { geometry(o, i); });
-	      else if (o.type in geometryType) geometryType[o.type](o.arcs, i);
-	    }
+	  if (arguments.length > 1) {
+	    var geomsByArc = [],
+	        geom;
 	
 	    var geometryType = {
 	      LineString: line,
 	      MultiLineString: polygon,
 	      Polygon: polygon,
-	      MultiPolygon: function(arcs, i) { arcs.forEach(function(arc) { polygon(arc, i); }); }
+	      MultiPolygon: function(arcs) { arcs.forEach(polygon); }
 	    };
 	
-	    objects.forEach(geometry);
+	    geometry(o);
 	
-	    for (var i in indexesByArc) {
-	      for (var indexes = indexesByArc[i], m = indexes.length, j = 0; j < m; ++j) {
-	        for (var k = j + 1; k < m; ++k) {
-	          var ij = indexes[j], ik = indexes[k], n;
-	          if ((n = neighbors[ij])[i = bisect(n, ik)] !== ik) n.splice(i, 0, ik);
-	          if ((n = neighbors[ik])[i = bisect(n, ij)] !== ij) n.splice(i, 0, ij);
-	        }
-	      }
-	    }
-	
-	    return neighbors;
+	    geomsByArc.forEach(arguments.length < 3
+	        ? function(geoms) { arcs.push(geoms[0].i); }
+	        : function(geoms) { if (filter(geoms[0].g, geoms[geoms.length - 1].g)) arcs.push(geoms[0].i); });
+	  } else {
+	    for (var i = 0, n = topology.arcs.length; i < n; ++i) arcs.push(i);
 	  }
 	
-	  function compareArea(a, b) {
-	    return a[1][2] - b[1][2];
+	  return {type: "MultiLineString", arcs: stitchArcs(topology, arcs)};
+	}
+	
+	function cartesianTriangleArea(triangle) {
+	  var a = triangle[0], b = triangle[1], c = triangle[2];
+	  return Math.abs((a[0] - c[0]) * (b[1] - a[1]) - (a[0] - b[0]) * (c[1] - a[1]));
+	}
+	
+	function ring(ring) {
+	  var i = -1,
+	      n = ring.length,
+	      a,
+	      b = ring[n - 1],
+	      area = 0;
+	
+	  while (++i < n) {
+	    a = b;
+	    b = ring[i];
+	    area += a[0] * b[1] - a[1] * b[0];
 	  }
 	
-	  function minAreaHeap() {
-	    var heap = {},
-	        array = [],
-	        size = 0;
+	  return area / 2;
+	}
 	
-	    heap.push = function(object) {
-	      up(array[object._ = size] = object, size++);
-	      return size;
-	    };
+	function merge(topology) {
+	  return object(topology, mergeArcs.apply(this, arguments));
+	}
 	
-	    heap.pop = function() {
-	      if (size <= 0) return;
-	      var removed = array[0], object;
-	      if (--size > 0) object = array[size], down(array[object._ = 0] = object, 0);
-	      return removed;
-	    };
+	function mergeArcs(topology, objects) {
+	  var polygonsByArc = {},
+	      polygons = [],
+	      components = [];
 	
-	    heap.remove = function(removed) {
-	      var i = removed._, object;
-	      if (array[i] !== removed) return; // invalid request
-	      if (i !== --size) object = array[size], (compareArea(object, removed) < 0 ? up : down)(array[object._ = i] = object, i);
-	      return i;
-	    };
+	  objects.forEach(function(o) {
+	    if (o.type === "Polygon") register(o.arcs);
+	    else if (o.type === "MultiPolygon") o.arcs.forEach(register);
+	  });
 	
-	    function up(object, i) {
-	      while (i > 0) {
-	        var j = ((i + 1) >> 1) - 1,
-	            parent = array[j];
-	        if (compareArea(object, parent) >= 0) break;
-	        array[parent._ = i] = parent;
-	        array[object._ = i = j] = object;
-	      }
-	    }
-	
-	    function down(object, i) {
-	      while (true) {
-	        var r = (i + 1) << 1,
-	            l = r - 1,
-	            j = i,
-	            child = array[j];
-	        if (l < size && compareArea(array[l], child) < 0) child = array[j = l];
-	        if (r < size && compareArea(array[r], child) < 0) child = array[j = r];
-	        if (j === i) break;
-	        array[child._ = i] = child;
-	        array[object._ = i = j] = object;
-	      }
-	    }
-	
-	    return heap;
-	  }
-	
-	  function presimplify(topology, triangleArea) {
-	    var absolute = transformAbsolute(topology.transform),
-	        relative = transformRelative(topology.transform),
-	        heap = minAreaHeap();
-	
-	    if (!triangleArea) triangleArea = cartesianTriangleArea;
-	
-	    topology.arcs.forEach(function(arc) {
-	      var triangles = [],
-	          maxArea = 0,
-	          triangle,
-	          i,
-	          n,
-	          p;
-	
-	      // To store each point’s effective area, we create a new array rather than
-	      // extending the passed-in point to workaround a Chrome/V8 bug (getting
-	      // stuck in smi mode). For midpoints, the initial effective area of
-	      // Infinity will be computed in the next step.
-	      for (i = 0, n = arc.length; i < n; ++i) {
-	        p = arc[i];
-	        absolute(arc[i] = [p[0], p[1], Infinity], i);
-	      }
-	
-	      for (i = 1, n = arc.length - 1; i < n; ++i) {
-	        triangle = arc.slice(i - 1, i + 2);
-	        triangle[1][2] = triangleArea(triangle);
-	        triangles.push(triangle);
-	        heap.push(triangle);
-	      }
-	
-	      for (i = 0, n = triangles.length; i < n; ++i) {
-	        triangle = triangles[i];
-	        triangle.previous = triangles[i - 1];
-	        triangle.next = triangles[i + 1];
-	      }
-	
-	      while (triangle = heap.pop()) {
-	        var previous = triangle.previous,
-	            next = triangle.next;
-	
-	        // If the area of the current point is less than that of the previous point
-	        // to be eliminated, use the latter's area instead. This ensures that the
-	        // current point cannot be eliminated without eliminating previously-
-	        // eliminated points.
-	        if (triangle[1][2] < maxArea) triangle[1][2] = maxArea;
-	        else maxArea = triangle[1][2];
-	
-	        if (previous) {
-	          previous.next = next;
-	          previous[2] = triangle[2];
-	          update(previous);
-	        }
-	
-	        if (next) {
-	          next.previous = previous;
-	          next[0] = triangle[0];
-	          update(next);
-	        }
-	      }
-	
-	      arc.forEach(relative);
+	  function register(polygon) {
+	    polygon.forEach(function(ring$$) {
+	      ring$$.forEach(function(arc) {
+	        (polygonsByArc[arc = arc < 0 ? ~arc : arc] || (polygonsByArc[arc] = [])).push(polygon);
+	      });
 	    });
+	    polygons.push(polygon);
+	  }
 	
-	    function update(triangle) {
-	      heap.remove(triangle);
+	  function area(ring$$) {
+	    return Math.abs(ring(object(topology, {type: "Polygon", arcs: [ring$$]}).coordinates[0]));
+	  }
+	
+	  polygons.forEach(function(polygon) {
+	    if (!polygon._) {
+	      var component = [],
+	          neighbors = [polygon];
+	      polygon._ = 1;
+	      components.push(component);
+	      while (polygon = neighbors.pop()) {
+	        component.push(polygon);
+	        polygon.forEach(function(ring$$) {
+	          ring$$.forEach(function(arc) {
+	            polygonsByArc[arc < 0 ? ~arc : arc].forEach(function(polygon) {
+	              if (!polygon._) {
+	                polygon._ = 1;
+	                neighbors.push(polygon);
+	              }
+	            });
+	          });
+	        });
+	      }
+	    }
+	  });
+	
+	  polygons.forEach(function(polygon) {
+	    delete polygon._;
+	  });
+	
+	  return {
+	    type: "MultiPolygon",
+	    arcs: components.map(function(polygons) {
+	      var arcs = [], n;
+	
+	      // Extract the exterior (unique) arcs.
+	      polygons.forEach(function(polygon) {
+	        polygon.forEach(function(ring$$) {
+	          ring$$.forEach(function(arc) {
+	            if (polygonsByArc[arc < 0 ? ~arc : arc].length < 2) {
+	              arcs.push(arc);
+	            }
+	          });
+	        });
+	      });
+	
+	      // Stitch the arcs into one or more rings.
+	      arcs = stitchArcs(topology, arcs);
+	
+	      // If more than one ring is returned,
+	      // at most one of these rings can be the exterior;
+	      // choose the one with the greatest absolute area.
+	      if ((n = arcs.length) > 1) {
+	        for (var i = 1, k = area(arcs[0]), ki, t; i < n; ++i) {
+	          if ((ki = area(arcs[i])) > k) {
+	            t = arcs[0], arcs[0] = arcs[i], arcs[i] = t, k = ki;
+	          }
+	        }
+	      }
+	
+	      return arcs;
+	    })
+	  };
+	}
+	
+	function neighbors(objects) {
+	  var indexesByArc = {}, // arc index -> array of object indexes
+	      neighbors = objects.map(function() { return []; });
+	
+	  function line(arcs, i) {
+	    arcs.forEach(function(a) {
+	      if (a < 0) a = ~a;
+	      var o = indexesByArc[a];
+	      if (o) o.push(i);
+	      else indexesByArc[a] = [i];
+	    });
+	  }
+	
+	  function polygon(arcs, i) {
+	    arcs.forEach(function(arc) { line(arc, i); });
+	  }
+	
+	  function geometry(o, i) {
+	    if (o.type === "GeometryCollection") o.geometries.forEach(function(o) { geometry(o, i); });
+	    else if (o.type in geometryType) geometryType[o.type](o.arcs, i);
+	  }
+	
+	  var geometryType = {
+	    LineString: line,
+	    MultiLineString: polygon,
+	    Polygon: polygon,
+	    MultiPolygon: function(arcs, i) { arcs.forEach(function(arc) { polygon(arc, i); }); }
+	  };
+	
+	  objects.forEach(geometry);
+	
+	  for (var i in indexesByArc) {
+	    for (var indexes = indexesByArc[i], m = indexes.length, j = 0; j < m; ++j) {
+	      for (var k = j + 1; k < m; ++k) {
+	        var ij = indexes[j], ik = indexes[k], n;
+	        if ((n = neighbors[ij])[i = bisect(n, ik)] !== ik) n.splice(i, 0, ik);
+	        if ((n = neighbors[ik])[i = bisect(n, ij)] !== ij) n.splice(i, 0, ij);
+	      }
+	    }
+	  }
+	
+	  return neighbors;
+	}
+	
+	function compareArea(a, b) {
+	  return a[1][2] - b[1][2];
+	}
+	
+	function minAreaHeap() {
+	  var heap = {},
+	      array = [],
+	      size = 0;
+	
+	  heap.push = function(object) {
+	    up(array[object._ = size] = object, size++);
+	    return size;
+	  };
+	
+	  heap.pop = function() {
+	    if (size <= 0) return;
+	    var removed = array[0], object;
+	    if (--size > 0) object = array[size], down(array[object._ = 0] = object, 0);
+	    return removed;
+	  };
+	
+	  heap.remove = function(removed) {
+	    var i = removed._, object;
+	    if (array[i] !== removed) return; // invalid request
+	    if (i !== --size) object = array[size], (compareArea(object, removed) < 0 ? up : down)(array[object._ = i] = object, i);
+	    return i;
+	  };
+	
+	  function up(object, i) {
+	    while (i > 0) {
+	      var j = ((i + 1) >> 1) - 1,
+	          parent = array[j];
+	      if (compareArea(object, parent) >= 0) break;
+	      array[parent._ = i] = parent;
+	      array[object._ = i = j] = object;
+	    }
+	  }
+	
+	  function down(object, i) {
+	    while (true) {
+	      var r = (i + 1) << 1,
+	          l = r - 1,
+	          j = i,
+	          child = array[j];
+	      if (l < size && compareArea(array[l], child) < 0) child = array[j = l];
+	      if (r < size && compareArea(array[r], child) < 0) child = array[j = r];
+	      if (j === i) break;
+	      array[child._ = i] = child;
+	      array[object._ = i = j] = object;
+	    }
+	  }
+	
+	  return heap;
+	}
+	
+	function presimplify(topology, triangleArea) {
+	  var absolute = transformAbsolute(topology.transform),
+	      relative = transformRelative(topology.transform),
+	      heap = minAreaHeap();
+	
+	  if (!triangleArea) triangleArea = cartesianTriangleArea;
+	
+	  topology.arcs.forEach(function(arc) {
+	    var triangles = [],
+	        maxArea = 0,
+	        triangle,
+	        i,
+	        n,
+	        p;
+	
+	    // To store each point’s effective area, we create a new array rather than
+	    // extending the passed-in point to workaround a Chrome/V8 bug (getting
+	    // stuck in smi mode). For midpoints, the initial effective area of
+	    // Infinity will be computed in the next step.
+	    for (i = 0, n = arc.length; i < n; ++i) {
+	      p = arc[i];
+	      absolute(arc[i] = [p[0], p[1], Infinity], i);
+	    }
+	
+	    for (i = 1, n = arc.length - 1; i < n; ++i) {
+	      triangle = arc.slice(i - 1, i + 2);
 	      triangle[1][2] = triangleArea(triangle);
+	      triangles.push(triangle);
 	      heap.push(triangle);
 	    }
 	
-	    return topology;
+	    for (i = 0, n = triangles.length; i < n; ++i) {
+	      triangle = triangles[i];
+	      triangle.previous = triangles[i - 1];
+	      triangle.next = triangles[i + 1];
+	    }
+	
+	    while (triangle = heap.pop()) {
+	      var previous = triangle.previous,
+	          next = triangle.next;
+	
+	      // If the area of the current point is less than that of the previous point
+	      // to be eliminated, use the latter's area instead. This ensures that the
+	      // current point cannot be eliminated without eliminating previously-
+	      // eliminated points.
+	      if (triangle[1][2] < maxArea) triangle[1][2] = maxArea;
+	      else maxArea = triangle[1][2];
+	
+	      if (previous) {
+	        previous.next = next;
+	        previous[2] = triangle[2];
+	        update(previous);
+	      }
+	
+	      if (next) {
+	        next.previous = previous;
+	        next[0] = triangle[0];
+	        update(next);
+	      }
+	    }
+	
+	    arc.forEach(relative);
+	  });
+	
+	  function update(triangle) {
+	    heap.remove(triangle);
+	    triangle[1][2] = triangleArea(triangle);
+	    heap.push(triangle);
 	  }
 	
-	  var version = "1.6.26";
+	  return topology;
+	}
 	
-	  exports.version = version;
-	  exports.mesh = mesh;
-	  exports.meshArcs = meshArcs;
-	  exports.merge = merge;
-	  exports.mergeArcs = mergeArcs;
-	  exports.feature = feature;
-	  exports.neighbors = neighbors;
-	  exports.presimplify = presimplify;
+	var version = "1.6.27";
 	
-	}));
+	exports.version = version;
+	exports.mesh = mesh;
+	exports.meshArcs = meshArcs;
+	exports.merge = merge;
+	exports.mergeArcs = mergeArcs;
+	exports.feature = feature;
+	exports.neighbors = neighbors;
+	exports.presimplify = presimplify;
+	
+	Object.defineProperty(exports, '__esModule', { value: true });
+	
+	})));
 
-/***/ },
+/***/ }),
 /* 18 */
-/***/ function(module, exports) {
+/***/ (function(module, exports) {
 
 	'use strict';
 	
@@ -10498,6 +10538,6 @@
 	  };
 	};
 
-/***/ }
+/***/ })
 /******/ ]);
 //# sourceMappingURL=app.js.map
