@@ -27,6 +27,7 @@ d3.select("#search").on("input", function() {
 });
 
 d3.selectAll(".example-link").on("click", function() {
+  d3.event.preventDefault();
   console.log(this.dataset.regex);
   var regex = this.dataset.regex;
   d3.select("#search").property("value", regex);
